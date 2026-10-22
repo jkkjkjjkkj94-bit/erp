@@ -1,0 +1,46 @@
+name: Adicionar modulo Clientes
+on:
+  push:
+    paths:
+      - '.github/workflows/add-clients.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Adicionar aba Clientes ao ERP
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          nav='''<div class="nav" data-page="clients"><svg class="icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2"/><path d="M3 20c.5-4 2.5-6 6-6s5.5 2 6 6M15 15c3 0 5 1.5 6 5"/></svg><span>Clientes</span></div>'''
+          marker='<div class="nav" data-page="financial">'
+          if 'data-page="clients"' not in s:
+              s=s.replace(marker,nav+marker,1)
+          section='''<section id="clients" class="page"><div class="head"><div><h1>Clientes</h1><div class="muted">Cadastro e gestão de clientes.</div></div><button class="btn" onclick="openClient()">Novo cliente</button></div><div class="tablebox"><table><thead><tr><th>NOME</th><th>CPF/CNPJ</th><th>TELEFONE</th><th>E-MAIL</th><th>CIDADE/UF</th><th>AÇÃO</th></tr></thead><tbody id="clientsBody"></tbody></table></div></section>'''
+          marker2='<section id="financial" class="page">'
+          if 'id="clients" class="page"' not in s:
+              s=s.replace(marker2,section+marker2,1)
+          s=s.replace('let state={products:[],suppliers:[],movements:[],financial:[],alerts:[],audit:[],users:[],sales:[],profile:null,scanProduct:null};','let state={products:[],suppliers:[],clients:[],movements:[],financial:[],alerts:[],audit:[],users:[],sales:[],profile:null,scanProduct:null};')
+          old="sb.from('suppliers').select('*').eq('active',true).order('name'),sb.from('stock_movements')"
+          new="sb.from('suppliers').select('*').eq('active',true).order('name'),sb.from('clients').select('*').eq('active',true).order('name'),sb.from('stock_movements')"
+          s=s.replace(old,new)
+          s=s.replace("['products','suppliers','movements','financial','alerts','audit','users','sales'].forEach((k,i)=>state[k]=q[i].data||[]);","['products','suppliers','clients','movements','financial','alerts','audit','users','sales'].forEach((k,i)=>state[k]=q[i].data||[]);")
+          s=s.replace('function renderAll(){renderProducts();renderSuppliers();renderMovements();','function renderAll(){renderProducts();renderSuppliers();renderClients();renderMovements();')
+          client_funcs='''function renderClients(){$('clientsBody').innerHTML=state.clients.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.document||'—')}</td><td>${esc(c.phone||'—')}</td><td>${esc(c.email||'—')}</td><td>${esc(c.city||'—')} / ${esc(c.state||'—')}</td><td><button class="mini" onclick="openClient('${c.id}')">Editar</button></td></tr>`).join('')||'<tr><td colspan="6">Nenhum cliente cadastrado.</td></tr>'}function openClient(id=''){let c=state.clients.find(x=>x.id===id)||{};modal(id?'Editar Cliente':'Novo Cliente',`<div class="formgrid"><div><label>Nome *</label><input id="cName" class="input" value="${esc(c.name||'')}"></div><div><label>CPF/CNPJ</label><input id="cDoc" class="input" value="${esc(c.document||'')}"></div><div><label>Telefone</label><input id="cPhone" class="input" value="${esc(c.phone||'')}"></div><div><label>E-mail</label><input id="cEmail" class="input" type="email" value="${esc(c.email||'')}"></div><div><label>Cidade</label><input id="cCity" class="input" value="${esc(c.city||'')}"></div><div><label>Estado</label><input id="cState" class="input" value="${esc(c.state||'')}"></div><div class="span2"><label>Endereço</label><input id="cAddress" class="input" value="${esc(c.address||'')}"></div><div class="span2"><label>Observações</label><textarea id="cNotes" class="input">${esc(c.notes||'')}</textarea></div></div><button class="btn w100" style="margin-top:20px" onclick="saveClient('${id}')">${id?'Salvar alterações':'Cadastrar cliente'}</button>`)}async function saveClient(id=''){let row={name:$('cName').value.trim(),document:$('cDoc').value.trim()||null,phone:$('cPhone').value.trim()||null,email:$('cEmail').value.trim()||null,city:$('cCity').value.trim()||null,state:$('cState').value.trim()||null,address:$('cAddress').value.trim()||null,notes:$('cNotes').value.trim()||null,updated_at:new Date().toISOString()};if(!row.name)return toast('Informe o nome do cliente');let r=id?await sb.from('clients').update(row).eq('id',id):await sb.from('clients').insert(row);if(r.error)return toast(r.error.message);closeModal();toast(id?'Cliente atualizado':'Cliente cadastrado');refreshAll()}'''
+          anchor='function renderSuppliers()'
+          if 'function renderClients()' not in s:
+              pos=s.index(anchor)
+              # insere antes de renderSuppliers; funções são hoisted
+              s=s[:pos]+client_funcs+s[pos:]
+          p.write_text(s,encoding='utf-8')
+      - name: Publicar alteração
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Adicionar aba de clientes ao ERP"
+          git push
