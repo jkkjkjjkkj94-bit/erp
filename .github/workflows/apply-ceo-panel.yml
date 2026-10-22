@@ -1,0 +1,45 @@
+name: Aplicar Painel CEO
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-ceo-panel.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aplicar painel CEO
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          nav='<div id="ceoNav" class="nav hidden" data-page="ceo"><svg class="icon" viewBox="0 0 24 24"><path d="M3 20h18M5 20V8l7-5 7 5v12M9 20v-6h6v6"/></svg><span>Painel CEO</span></div>'
+          if 'id="ceoNav"' not in s:
+              s=s.replace('<div class="side-spacer"></div>',nav+'<div class="side-spacer"></div>')
+          page='''<section id="ceo" class="page"><div class="head"><div><h1>Painel CEO</h1><div class="muted">Gestão global das lojas da plataforma.</div></div><button class="btn secondary" onclick="exitCeoStore()">Visão global</button></div><div class="cards"><div class="card kpi"><span>LOJAS</span><strong id="ceoStores">0</strong><small>Total cadastrado</small></div><div class="card kpi"><span>ATIVAS</span><strong id="ceoActive">0</strong><small>Lojas liberadas</small></div><div class="card kpi"><span>BLOQUEADAS</span><strong id="ceoBlocked">0</strong><small>Acesso suspenso</small></div><div class="card kpi"><span>USUÁRIOS</span><strong id="ceoUsers">0</strong><small>Contas cadastradas</small></div></div><div class="tablebox"><div class="tabletitle">Todas as lojas</div><table><thead><tr><th>LOJA</th><th>STATUS</th><th>MENSALIDADE</th><th>VENCIMENTO</th><th>PAGO ATÉ</th><th>USUÁRIOS</th><th>AÇÕES</th></tr></thead><tbody id="ceoStoresBody"></tbody></table></div></section>'''
+          if 'id="ceo" class="page"' not in s:
+              s=s.replace('<section id="users" class="page">',page+'<section id="users" class="page">')
+          s=s.replace('sales:[],profile:null,scanProduct:null','sales:[],stores:[],profile:null,scanProduct:null,ceoStore:null')
+          old="state.profile=p;let name=p?.full_name||session.user.email;$('userName').textContent=name;$('userRole').textContent=p?.role||'usuário';$('avatar').textContent=(name||'U').charAt(0).toUpperCase();await refreshAll()"
+          new="state.profile=p;let name=p?.full_name||session.user.email;$('userName').textContent=name;$('userRole').textContent=p?.role==='ceo'?'CEO':(p?.role==='admin'?'Lojista':(p?.role||'usuário'));$('avatar').textContent=(name||'U').charAt(0).toUpperCase();$('ceoNav').classList.toggle('hidden',p?.role!=='ceo');await refreshAll()"
+          s=s.replace(old,new)
+          start=s.index('async function refreshAll(){')
+          end=s.index('function renderAll(){',start)
+          refresh="""async function refreshAll(){let ceo=state.profile?.role==='ceo',sid=state.ceoStore;function tenant(q){return ceo&&sid?q.eq('store_id',sid):q}const queries=[tenant(sb.from('products').select('*').eq('active',true)).order('name'),tenant(sb.from('suppliers').select('*').eq('active',true)).order('name'),tenant(sb.from('customers').select('*').eq('active',true)).order('name'),tenant(sb.from('stock_movements').select('*,products(name,internal_code)')).order('created_at',{ascending:false}).limit(200),tenant(sb.from('financial_entries').select('*')).order('entry_date',{ascending:false}).limit(200),tenant(sb.from('alerts').select('*,products(name)').neq('status','resolvido')).order('created_at',{ascending:false}).limit(100),tenant(sb.from('audit_logs').select('*')).order('created_at',{ascending:false}).limit(200),(ceo&&sid?sb.from('profiles').select('*').eq('store_id',sid):sb.from('profiles').select('*')).order('created_at'),tenant(sb.from('sales').select('*')).order('created_at',{ascending:false}).limit(500)];if(ceo)queries.push(sb.from('stores').select('*').is('deleted_at',null).order('created_at'));const q=await Promise.all(queries);['products','suppliers','clients','movements','financial','alerts','audit','users','sales'].forEach((k,i)=>state[k]=q[i].data||[]);state.stores=ceo?(q[9]?.data||[]):[];renderAll()}"""
+          s=s[:start]+refresh+s[end:]
+          s=s.replace('renderUsers();renderDashboard()','renderUsers();renderDashboard();renderCEO()')
+          marker='function monthStart()'
+          funcs="""function renderCEO(){if(state.profile?.role!=='ceo')return;let stores=state.stores,users=state.users;$('ceoStores').textContent=stores.length;$('ceoActive').textContent=stores.filter(x=>x.active&&x.subscription_status!=='blocked').length;$('ceoBlocked').textContent=stores.filter(x=>!x.active||x.subscription_status==='blocked').length;$('ceoUsers').textContent=users.length;$('ceoStoresBody').innerHTML=stores.map(x=>{let n=users.filter(u=>u.store_id===x.id).length,blocked=!x.active||x.subscription_status==='blocked';return `<tr><td><b>${esc(x.name)}</b>${state.ceoStore===x.id?'<div class="muted">Visualizando agora</div>':''}</td><td><span class="badge ${blocked?'danger':'ok'}">${blocked?'Bloqueada':'Ativa'}</span></td><td>${money(x.monthly_fee)}</td><td>Dia ${x.due_day||'—'}</td><td>${esc(x.paid_until||'—')}</td><td>${n}</td><td><button class="mini" onclick="enterCeoStore('${x.id}')">Acessar</button> <button class="mini" onclick="openStoreBilling('${x.id}')">Cobrança</button> <button class="mini" onclick="setStoreBlock('${x.id}',${blocked})">${blocked?'Desbloquear':'Bloquear'}</button></td></tr>`}).join('')||'<tr><td colspan="7">Nenhuma loja cadastrada.</td></tr>'}async function enterCeoStore(id){state.ceoStore=id;await refreshAll();showPage('dashboard');toast('Loja selecionada')}async function exitCeoStore(){state.ceoStore=null;await refreshAll();showPage('ceo');toast('Visão global restaurada')}async function setStoreBlock(id,isBlocked){let reason=null;if(!isBlocked){reason=prompt('Motivo do bloqueio:','Mensalidade em atraso');if(reason===null)return}let{error}=await sb.rpc('ceo_set_store_status',{p_store:id,p_status:isBlocked?'active':'blocked',p_reason:reason});if(error)return toast(error.message);toast(isBlocked?'Loja desbloqueada':'Loja bloqueada');refreshAll()}function openStoreBilling(id){let x=state.stores.find(s=>s.id===id);if(!x)return;modal('Cobrança da Loja',`<label>Mensalidade</label><input id="billFee" class="input" type="number" step=".01" value="${x.monthly_fee||0}"><label>Dia do vencimento</label><input id="billDay" class="input" type="number" min="1" max="28" value="${x.due_day||10}"><label>Pago até</label><input id="billPaid" class="input" type="date" value="${x.paid_until||''}"><button class="btn w100" style="margin-top:20px" onclick="saveStoreBilling('${id}')">Salvar cobrança</button>`)}async function saveStoreBilling(id){let{error}=await sb.rpc('ceo_update_store_billing',{p_store:id,p_monthly_fee:+$('billFee').value||0,p_due_day:+$('billDay').value||10,p_paid_until:$('billPaid').value||null});if(error)return toast(error.message);closeModal();toast('Cobrança atualizada');refreshAll()}"""
+          if 'function renderCEO()' not in s:
+              s=s.replace(marker,funcs+marker)
+          p.write_text(s)
+          PY
+      - name: Publicar alteração
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || (git commit -m "Aplicar painel CEO multi-loja" && git push)
