@@ -1,0 +1,61 @@
+name: Aplicar SaaS e PDV
+on:
+  push:
+    paths: ['.github/workflows/apply-saas-pdv.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atualizar ERP
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text()
+          # Cadastro de loja
+          if 'id="signupStore"' not in s:
+            s=s.replace('<label>E-mail</label><input id="signupEmail"', '<label>Nome da Loja</label><input id="signupStore" class="input" placeholder="Ex.: Minha Loja"><label>E-mail</label><input id="signupEmail"',1)
+          s=s.replace("options:{data:{full_name:$('signupName').value}}", "options:{data:{full_name:$('signupName').value,store_name:$('signupStore').value.trim()}}")
+          # Clientes: tabela real
+          s=s.replace("sb.from('clients')", "sb.from('customers')")
+          # Renomeia leitor para PDV
+          s=s.replace('<span>Leitor de Venda</span>','<span>PDV</span>').replace('<h1>Leitor de Venda</h1>','<h1>PDV · Frente de Caixa</h1>')
+          # Carrinho PDV
+          s=s.replace('profile:null,scanProduct:null,ceoStore:null','profile:null,scanProduct:null,ceoStore:null,cart:[]')
+          old='<div class="muted">O valor é calculado conforme produto e quantidade.</div><button class="btn yellow w100" style="margin-top:25px" onclick="confirmScan()">Confirmar venda</button>'
+          new='''<div class="muted">Carrinho da venda</div><div id="cartList" style="margin:14px 0"></div><label>Cliente</label><select id="posCustomer" class="input"><option value="">Consumidor final</option></select><label>Forma de pagamento</label><select id="posPayment" class="input"><option>Dinheiro</option><option>PIX</option><option>Cartão de débito</option><option>Cartão de crédito</option><option>Outro</option></select><label>Desconto</label><input id="posDiscount" class="input" type="number" step=".01" value="0" oninput="renderCart()"><button class="btn yellow w100" style="margin-top:18px" onclick="finishPOS()">Finalizar venda</button>'''
+          s=s.replace(old,new)
+          s=s.replace("<button class=\"btn yellow w100\" style=\"margin-top:25px\" onclick=\"confirmScan()\">Confirmar venda</button>","<button class=\"btn yellow w100\" style=\"margin-top:18px\" onclick=\"addToCart()\">Adicionar ao carrinho</button>")
+          # Como o bloco anterior pode ter removido o botão, adiciona no painel do produto
+          needle='<p id="scanHint" class="muted">Aguardando produto...</p>'
+          if 'onclick="addToCart()"' not in s:
+            s=s.replace(needle,'<button class="btn w100" style="margin-top:16px" onclick="addToCart()">Adicionar ao carrinho</button>'+needle)
+          # Funções do PDV
+          marker='async function confirmScan()'
+          funcs='''function addToCart(){let p=state.scanProduct,q=+$('scanQty').value;if(!p||q<=0)return toast('Leia um produto e informe a quantidade');let x=state.cart.find(i=>i.product_id===p.id);let total=(x?x.quantity:0)+q;if(total>+p.stock_quantity)return toast('Quantidade maior que o estoque');if(x)x.quantity=total;else state.cart.push({product_id:p.id,name:p.name,quantity:q,unit_price:+p.sale_price});$('scanCode').value='';$('scanQty').value=1;state.scanProduct=null;$('scanFound').classList.add('hidden');$('scanHint').classList.remove('hidden');renderCart();$('scanCode').focus()}function removeCart(i){state.cart.splice(i,1);renderCart()}function renderCart(){let el=$('cartList');if(!el)return;let sub=state.cart.reduce((a,i)=>a+i.quantity*i.unit_price,0),disc=+$('posDiscount')?.value||0;el.innerHTML=state.cart.map((i,n)=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid #333"><span>${esc(i.quantity)}x ${esc(i.name)}</span><span>${money(i.quantity*i.unit_price)} <button class="mini" onclick="removeCart(${n})">×</button></span></div>`).join('')||'<div class="muted">Carrinho vazio</div>';$('scanTotal').textContent=money(Math.max(0,sub-disc))}async function finishPOS(){if(!state.cart.length)return toast('Carrinho vazio');let customer=$('posCustomer')?.value||null,payment=$('posPayment')?.value||'Dinheiro',discount=+$('posDiscount')?.value||0;let items=state.cart.map(i=>({product_id:i.product_id,quantity:i.quantity,unit_price:i.unit_price}));let{error}=await sb.rpc('create_pos_sale',{p_items:items,p_customer:customer,p_payment_method:payment,p_discount:discount,p_notes:null});if(error)return toast(error.message);state.cart=[];if($('posDiscount'))$('posDiscount').value=0;renderCart();toast('Venda finalizada');await refreshAll()}function fillPOSCustomers(){let e=$('posCustomer');if(e)e.innerHTML='<option value="">Consumidor final</option>'+state.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}'''
+          if 'function addToCart()' not in s:s=s.replace(marker,funcs+marker)
+          s=s.replace('renderUsers();renderDashboard();renderCEO()','renderUsers();renderDashboard();renderCEO();fillPOSCustomers();renderCart()')
+          # Tela de assinatura para lojista
+          subscription='''<section id="subscription" class="page"><div class="head"><div><h1>Minha Assinatura</h1><div class="muted">Situação da loja e mensalidade.</div></div></div><div id="subscriptionCard" class="card" style="max-width:720px"></div></section>'''
+          if 'id="subscription" class="page"' not in s:s=s.replace('<section id="users" class="page">',subscription+'<section id="users" class="page">')
+          nav='<div id="subscriptionNav" class="nav" data-page="subscription"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg><span>Assinatura</span></div>'
+          if 'id="subscriptionNav"' not in s:s=s.replace('<div class="side-spacer"></div>',nav+'<div class="side-spacer"></div>')
+          # Carrega loja do usuário e mostra assinatura
+          s=s.replace('sales:[],stores:[]','sales:[],stores:[],myStore:null')
+          oldboot="$('ceoNav').classList.toggle('hidden',p?.role!=='ceo');await refreshAll()"
+          newboot="$('ceoNav').classList.toggle('hidden',p?.role!=='ceo');if(p?.store_id){let{data:st}=await sb.from('stores').select('*').eq('id',p.store_id).maybeSingle();state.myStore=st;if(p?.role!=='ceo'&&st&&!st.active){$('subscriptionNav')?.classList.remove('hidden');await refreshAll();showPage('subscription');toast('Loja bloqueada. Consulte a situação da assinatura.');return}}await refreshAll()"
+          s=s.replace(oldboot,newboot)
+          marker2='function renderCEO()'
+          subfn="""function renderSubscription(){let x=state.myStore;if(!x||!$('subscriptionCard'))return;let blocked=!x.active||x.subscription_status==='blocked';$('subscriptionCard').innerHTML=`<div style="display:flex;justify-content:space-between;gap:15px;align-items:center"><div><div class="muted">STATUS</div><h2>${blocked?'Loja bloqueada':'Assinatura ativa'}</h2></div><span class="badge ${blocked?'danger':'ok'}">${esc(x.subscription_status||'active')}</span></div><div class="dreline"><span>Mensalidade</span><b>${money(x.monthly_fee)}</b></div><div class="dreline"><span>Vencimento</span><b>Dia ${x.due_day||'—'}</b></div><div class="dreline"><span>Pago até</span><b>${esc(x.paid_until||'—')}</b></div>${x.blocked_reason?`<div class="section-note">Motivo: ${esc(x.blocked_reason)}</div>`:''}`}"""
+          if 'function renderSubscription()' not in s:s=s.replace(marker2,subfn+marker2)
+          s=s.replace('renderCEO();fillPOSCustomers();renderCart()','renderCEO();renderSubscription();fillPOSCustomers();renderCart()')
+          p.write_text(s)
+          PY
+      - name: Publicar
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || (git commit -m "Implementar SaaS, assinatura e PDV" && git push)
