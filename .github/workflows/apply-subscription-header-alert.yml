@@ -1,4 +1,4 @@
-name: Aplicar status completo da assinatura no cabecalho
+name: Aplicar cobranca com data manual de bloqueio
 on:
   workflow_dispatch:
   push:
@@ -11,19 +11,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Atualizar status da assinatura
+      - name: Atualizar cobranca CEO
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
           p=Path('index.html')
           s=p.read_text()
-          s=s.replace('.subscription-alert.warning{display:flex;background:#fff6d5;color:#806500;border:1px solid #f1df9c}', '.subscription-alert.warning{display:flex;background:#fff6d5;color:#806500;border:1px solid #f1df9c}.subscription-alert.active{display:flex;background:#eaf8f0;color:#137a47;border:1px solid #bfe8d0}')
-          pattern=r"function renderHeaderSubscriptionAlert\(\)\{.*?\}function renderSubscription\(\)\{"
-          replacement="""function renderHeaderSubscriptionAlert(){let el=$('subscriptionAlert');if(!el)return;let x=state.profile?.role==='ceo'?(state.ceoStore?state.stores.find(s=>s.id===state.ceoStore):null):state.myStore;el.className='subscription-alert';el.textContent='';if(!x)return;let blocked=!x.active||['blocked','cancelled'].includes(x.subscription_status);let fmt=v=>{if(!v)return '—';let d=new Date(v+'T12:00:00');return d.toLocaleDateString('pt-BR')};if(blocked){el.classList.add('blocked');el.textContent='🔒 LOJA BLOQUEADA · Mensalidade vencida';return}if(x.paid_until){let today=new Date();today.setHours(0,0,0,0);let due=new Date(x.paid_until+'T12:00:00');due.setHours(0,0,0,0);let days=Math.round((due-today)/86400000);if(days<0){el.classList.add('blocked');el.textContent=`🔒 MENSALIDADE VENCIDA · ${fmt(x.paid_until)}`;return}if(days<=5){el.classList.add('warning');el.textContent=days===0?`⚠ VENCE HOJE · ${fmt(x.paid_until)}`:`⚠ VENCE EM ${days} DIA${days===1?'':'S'} · ${fmt(x.paid_until)}`;return}el.classList.add('active');el.textContent=`✓ ASSINATURA ATIVA · VENCE EM ${fmt(x.paid_until)}`;return}if(x.due_day){el.classList.add('warning');el.textContent=`⚠ VENCIMENTO TODO DIA ${x.due_day}`}}function renderSubscription(){"""
-          s2,n=re.subn(pattern,replacement,s,count=1)
+          # Adiciona data limite de bloqueio ao modal de cobrança.
+          pat=r"function openStoreBilling\(id\)\{.*?\}async function saveStoreBilling\(id\)\{.*?\}(?=function |async function )"
+          rep="""function openStoreBilling(id){let x=state.stores.find(s=>s.id===id);if(!x)return;modal('Cobrança da Loja',`<div class=note>Defina a mensalidade, o vencimento e a data limite. Se o pagamento não for confirmado até a data limite, a loja será bloqueada.</div><label>Mensalidade</label><input id=\"billFee\" type=\"number\" min=\"0\" step=\"0.01\" value=\"${x.monthly_fee||0}\"><label>Vence todo dia</label><input id=\"billDay\" type=\"number\" min=\"1\" max=\"28\" value=\"${x.due_day||10}\"><label>Bloquear se não pagar até</label><input id=\"billBlockOn\" type=\"date\" value=\"${x.block_on||''}\"><div style=\"display:flex;gap:8px;flex-wrap:wrap;margin-top:12px\"><button class=\"btn primary\" onclick=\"saveStoreBilling('${id}')\">Salvar cobrança</button><button class=\"btn\" onclick=\"markStorePaid('${id}')\">Marcar mensalidade como paga</button></div>`)}async function saveStoreBilling(id){let fee=+$('billFee').value||0,day=+$('billDay').value||10,block=$('billBlockOn').value||null;let{error}=await sb.rpc('ceo_update_store_billing',{p_store:id,p_monthly_fee:fee,p_due_day:day,p_paid_until:null,p_block_on:block});if(error){toast(error.message,'err');return}closeModal();toast('Cobrança atualizada');await refreshAll()}"""
+          s2,n=re.subn(pat,rep,s,count=1,flags=re.S)
           if n!=1:
-              raise SystemExit('Função de assinatura não encontrada para atualização')
+              raise SystemExit('Bloco de cobrança CEO não encontrado')
+          # Mostra data de bloqueio na tabela CEO, junto ao vencimento, quando houver.
+          s2=s2.replace("<td>Dia ${x.due_day||'—'}</td>", "<td>Dia ${x.due_day||'—'}${x.block_on?`<div class=muted>Bloqueio: ${esc(x.block_on)}</div>`:''}</td>")
           p.write_text(s2)
           PY
       - name: Commit
@@ -32,5 +34,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add index.html
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Mostrar status e vencimento da assinatura ao lojista'
+          git commit -m 'Adicionar data manual de bloqueio na cobranca CEO'
           git push
