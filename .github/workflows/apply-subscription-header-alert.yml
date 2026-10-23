@@ -1,0 +1,38 @@
+name: Aplicar alerta de assinatura no cabecalho
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/apply-subscription-header-alert.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atualizar index.html
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          s=s.replace('.userarea{margin-left:auto;display:flex;align-items:center;gap:10px}', '.subscription-alert{display:none;align-items:center;gap:7px;padding:8px 11px;border-radius:9px;font-size:11px;font-weight:900;white-space:nowrap}.subscription-alert.blocked{display:flex;background:#fff0ef;color:#b42318;border:1px solid #f4c7c3}.subscription-alert.warning{display:flex;background:#fff6d5;color:#806500;border:1px solid #f1df9c}.userarea{margin-left:auto;display:flex;align-items:center;gap:10px}')
+          s=s.replace('<div class="userarea"><div class="avatar"', '<div id="subscriptionAlert" class="subscription-alert"></div><div class="userarea"><div class="avatar"')
+          s=s.replace('function renderAll(){renderProducts();', 'function renderAll(){renderHeaderSubscriptionAlert();renderProducts();')
+          marker='function renderSubscription(){'
+          fn="""function renderHeaderSubscriptionAlert(){let el=$('subscriptionAlert');if(!el)return;let x=state.profile?.role==='ceo'&&state.ceoStore?state.stores.find(s=>s.id===state.ceoStore):state.myStore;el.className='subscription-alert';el.textContent='';if(!x)return;let blocked=!x.active||['blocked','cancelled'].includes(x.subscription_status);if(blocked){el.classList.add('blocked');el.textContent='🔒 LOJA BLOQUEADA · Assinatura vencida';return}if(x.paid_until){let today=new Date();today.setHours(0,0,0,0);let due=new Date(x.paid_until+'T00:00:00');let days=Math.ceil((due-today)/86400000);if(days>=0&&days<=5){el.classList.add('warning');el.textContent=days===0?'⚠ ASSINATURA VENCE HOJE':`⚠ ASSINATURA VENCE EM ${days} DIA${days===1?'':'S'}`}}}function renderSubscription(){"""
+          if marker in s and 'function renderHeaderSubscriptionAlert()' not in s:
+              s=s.replace(marker,fn)
+          s=s.replace("async function enterCeoStore(id){state.ceoStore=id;await refreshAll();showPage('dashboard');toast('Loja selecionada')}", "async function enterCeoStore(id){state.ceoStore=id;await refreshAll();renderHeaderSubscriptionAlert();showPage('dashboard');toast('Loja selecionada')}")
+          s=s.replace("async function exitCeoStore(){state.ceoStore=null;await refreshAll();showPage('ceo');toast('Visão global restaurada')}", "async function exitCeoStore(){state.ceoStore=null;await refreshAll();renderHeaderSubscriptionAlert();showPage('ceo');toast('Visão global restaurada')}")
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Exibir status da assinatura no cabecalho'
+          git push
