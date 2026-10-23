@@ -1,0 +1,35 @@
+name: Melhorar Assinatura
+on:
+  push:
+    paths:
+      - '.github/workflows/improve-subscription.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atualizar tela de cobrança
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          old="function openStoreBilling(id){let x=state.stores.find(s=>s.id===id);if(!x)return;modal('Cobrança da Loja',`<label>Mensalidade</label><input id=\"billFee\" class=\"input\" type=\"number\" step=\".01\" value=\"${x.monthly_fee||0}\"><label>Dia do vencimento</label><input id=\"billDay\" class=\"input\" type=\"number\" min=\"1\" max=\"28\" value=\"${x.due_day||10}\"><label>Pago até</label><input id=\"billPaid\" class=\"input\" type=\"date\" value=\"${x.paid_until||''}\"><button class=\"btn w100\" style=\"margin-top:20px\" onclick=\"saveStoreBilling('${id}')\">Salvar cobrança</button>`)}async function saveStoreBilling(id){let{error}=await sb.rpc('ceo_update_store_billing',{p_store:id,p_monthly_fee:+$('billFee').value||0,p_due_day:+$('billDay').value||10,p_paid_until:$('billPaid').value||null});if(error)return toast(error.message);closeModal();toast('Cobrança atualizada');refreshAll()}"
+          new="function openStoreBilling(id){let x=state.stores.find(s=>s.id===id);if(!x)return;modal('Cobrança da Loja',`<div class=\"section-note\">Defina o valor e o dia fixo de vencimento. Quando receber a mensalidade, clique em <b>Marcar como pago</b>; o sistema calcula automaticamente o próximo vencimento.</div><label>Mensalidade</label><input id=\"billFee\" class=\"input\" type=\"number\" step=\".01\" min=\"0\" value=\"${x.monthly_fee||0}\"><label>Vence todo dia</label><input id=\"billDay\" class=\"input\" type=\"number\" min=\"1\" max=\"28\" value=\"${x.due_day||10}\"><div class=\"dreline\"><span>Assinatura válida até</span><b>${esc(x.paid_until||'Ainda não paga')}</b></div><button class=\"btn w100\" style=\"margin-top:16px\" onclick=\"saveStoreBilling('${id}')\">Salvar valor e vencimento</button><button class=\"btn yellow w100\" style=\"margin-top:8px\" onclick=\"markStorePaid('${id}')\">✓ Marcar mensalidade como paga</button>`)}async function saveStoreBilling(id){let day=+$('billDay').value;if(day<1||day>28)return toast('Escolha um vencimento entre os dias 1 e 28');let x=state.stores.find(s=>s.id===id),{error}=await sb.rpc('ceo_update_store_billing',{p_store:id,p_monthly_fee:+$('billFee').value||0,p_due_day:day,p_paid_until:x?.paid_until||null});if(error)return toast(error.message);closeModal();toast('Vencimento atualizado');await refreshAll()}async function markStorePaid(id){let day=+$('billDay').value;if(day<1||day>28)return toast('Escolha um vencimento entre os dias 1 e 28');let x=state.stores.find(s=>s.id===id);let r=await sb.rpc('ceo_update_store_billing',{p_store:id,p_monthly_fee:+$('billFee').value||0,p_due_day:day,p_paid_until:x?.paid_until||null});if(r.error)return toast(r.error.message);let{error}=await sb.rpc('ceo_mark_store_paid',{p_store:id});if(error)return toast(error.message);closeModal();toast('Pagamento confirmado e próximo vencimento calculado');await refreshAll()}"
+          if old not in s:
+              raise SystemExit('Trecho de cobrança não encontrado')
+          s=s.replace(old,new)
+          s=s.replace("<th>PAGO ATÉ</th>","<th>VÁLIDA ATÉ</th>")
+          s=s.replace("<span>Pago até</span>","<span>Assinatura válida até</span>")
+          p.write_text(s)
+          PY
+      - name: Publicar
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git diff --cached --quiet || git commit -m 'Simplificar cobrança e pagamento de assinatura'
+          git push
