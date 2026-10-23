@@ -1,4 +1,4 @@
-name: Aplicar cobranca com data manual de bloqueio
+name: Modernizar painel CEO
 on:
   workflow_dispatch:
   push:
@@ -11,21 +11,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Atualizar cobranca CEO
+      - name: Melhorar painel CEO
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
           p=Path('index.html')
           s=p.read_text()
-          # Adiciona data limite de bloqueio ao modal de cobrança.
-          pat=r"function openStoreBilling\(id\)\{.*?\}async function saveStoreBilling\(id\)\{.*?\}(?=function |async function )"
-          rep="""function openStoreBilling(id){let x=state.stores.find(s=>s.id===id);if(!x)return;modal('Cobrança da Loja',`<div class=note>Defina a mensalidade, o vencimento e a data limite. Se o pagamento não for confirmado até a data limite, a loja será bloqueada.</div><label>Mensalidade</label><input id=\"billFee\" type=\"number\" min=\"0\" step=\"0.01\" value=\"${x.monthly_fee||0}\"><label>Vence todo dia</label><input id=\"billDay\" type=\"number\" min=\"1\" max=\"28\" value=\"${x.due_day||10}\"><label>Bloquear se não pagar até</label><input id=\"billBlockOn\" type=\"date\" value=\"${x.block_on||''}\"><div style=\"display:flex;gap:8px;flex-wrap:wrap;margin-top:12px\"><button class=\"btn primary\" onclick=\"saveStoreBilling('${id}')\">Salvar cobrança</button><button class=\"btn\" onclick=\"markStorePaid('${id}')\">Marcar mensalidade como paga</button></div>`)}async function saveStoreBilling(id){let fee=+$('billFee').value||0,day=+$('billDay').value||10,block=$('billBlockOn').value||null;let{error}=await sb.rpc('ceo_update_store_billing',{p_store:id,p_monthly_fee:fee,p_due_day:day,p_paid_until:null,p_block_on:block});if(error){toast(error.message,'err');return}closeModal();toast('Cobrança atualizada');await refreshAll()}"""
+          css=""".ceo-hero{background:#17181b;color:#fff;border-radius:18px;padding:25px 27px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;gap:20px}.ceo-hero h1{margin:0 0 7px;font-size:28px}.ceo-hero .muted{color:#aeb3bb}.ceo-tag{background:var(--y);color:#111;padding:8px 11px;border-radius:9px;font-size:11px;font-weight:900}.ceo-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.ceo-kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;min-height:112px}.ceo-kpi span{font-size:10px;color:#7b818b;font-weight:900;letter-spacing:.6px}.ceo-kpi strong{display:block;font-size:27px;margin-top:12px}.ceo-kpi.danger strong{color:#b42318}.ceo-kpi.warn strong{color:#806500}.ceo-toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:15px 17px;border-bottom:1px solid var(--line);background:#fff}.ceo-toolbar .input{max-width:340px}.ceo-store-name{font-weight:900}.ceo-store-meta{font-size:11px;color:var(--muted);margin-top:4px}.ceo-actions{display:flex;gap:6px;flex-wrap:wrap}.ceo-actions .mini.primary{background:#17181b;color:#fff;border-color:#17181b}.ceo-actions .mini.billing{background:#fff8d8;border-color:#ecd76d}.ceo-actions .mini.danger{color:#b42318;border-color:#f1c6c2}.ceo-actions .mini.ok{color:#137a47;border-color:#bfe8d0}@media(max-width:1050px){.ceo-kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.ceo-hero{align-items:flex-start;flex-direction:column}.ceo-kpis{grid-template-columns:1fr 1fr}.ceo-toolbar{align-items:stretch;flex-direction:column}.ceo-toolbar .input{max-width:none}}"""
+          s=s.replace('</style>',css+'</style>',1)
+          old=re.search(r'<section id="ceo" class="page">.*?</section><section id="subscription"',s,re.S)
+          if not old: raise SystemExit('Painel CEO não encontrado')
+          new='''<section id="ceo" class="page"><div class="ceo-hero"><div><h1>Painel CEO</h1><div class="muted">Controle central de lojas, assinaturas, bloqueios e acessos.</div></div><div class="ceo-tag">ADMINISTRAÇÃO DA PLATAFORMA</div></div><div class="ceo-kpis"><div class="ceo-kpi"><span>TOTAL DE LOJAS</span><strong id="ceoStores">0</strong><small class="muted">Cadastradas</small></div><div class="ceo-kpi"><span>LOJAS ATIVAS</span><strong id="ceoActive">0</strong><small class="muted">Acesso liberado</small></div><div class="ceo-kpi danger"><span>BLOQUEADAS</span><strong id="ceoBlocked">0</strong><small class="muted">Acesso suspenso</small></div><div class="ceo-kpi warn"><span>COBRANÇAS PRÓXIMAS</span><strong id="ceoDueSoon">0</strong><small class="muted">Próximos 7 dias</small></div><div class="ceo-kpi"><span>USUÁRIOS</span><strong id="ceoUsers">0</strong><small class="muted">Contas cadastradas</small></div></div><div class="tablebox"><div class="ceo-toolbar"><div><b>Gestão de lojas</b><div class="muted">Acompanhe cobrança e acesso de cada lojista.</div></div><input id="ceoStoreSearch" class="input" placeholder="Pesquisar loja..." oninput="renderCEO()"></div><table><thead><tr><th>LOJA</th><th>STATUS</th><th>MENSALIDADE</th><th>VENCIMENTO</th><th>BLOQUEIO</th><th>VÁLIDA ATÉ</th><th>USUÁRIOS</th><th>AÇÕES</th></tr></thead><tbody id="ceoStoresBody"></tbody></table></div></section><section id="subscription"'''
+          s=s[:old.start()]+new+s[old.end():]
+          pat=r"function renderCEO\(\)\{.*?\}(?=async function enterCeoStore)"
+          rep="""function renderCEO(){if(state.profile?.role!=='ceo')return;let stores=state.stores,users=state.users,q=($('ceoStoreSearch')?.value||'').trim().toLowerCase(),today=new Date();today.setHours(0,0,0,0);let dueSoon=stores.filter(x=>{if(!x.paid_until||!x.active)return false;let d=new Date(x.paid_until+'T12:00:00');d.setHours(0,0,0,0);let n=Math.round((d-today)/86400000);return n>=0&&n<=7}).length;$('ceoStores').textContent=stores.length;$('ceoActive').textContent=stores.filter(x=>x.active&&x.subscription_status!=='blocked').length;$('ceoBlocked').textContent=stores.filter(x=>!x.active||x.subscription_status==='blocked').length;$('ceoUsers').textContent=users.length;if($('ceoDueSoon'))$('ceoDueSoon').textContent=dueSoon;let list=q?stores.filter(x=>(x.name||'').toLowerCase().includes(q)):stores;$('ceoStoresBody').innerHTML=list.map(x=>{let n=users.filter(u=>u.store_id===x.id).length,blocked=!x.active||x.subscription_status==='blocked',status=blocked?'Bloqueada':(x.subscription_status==='overdue'?'Em atraso':'Ativa'),cls=blocked?'danger':(x.subscription_status==='overdue'?'warn':'ok');return `<tr><td><div class=\"ceo-store-name\">${esc(x.name)}</div><div class=\"ceo-store-meta\">${state.ceoStore===x.id?'● Visualizando agora':`${n} usuário${n===1?'':'s'}`}</div></td><td><span class=\"badge ${cls}\">${status}</span></td><td><b>${money(x.monthly_fee)}</b></td><td>Dia ${x.due_day||'—'}</td><td>${x.block_on?esc(x.block_on):'—'}</td><td>${esc(x.paid_until||'—')}</td><td>${n}</td><td><div class=\"ceo-actions\"><button class=\"mini primary\" onclick=\"enterCeoStore('${x.id}')\">Acessar</button><button class=\"mini billing\" onclick=\"openStoreBilling('${x.id}')\">Cobrança</button><button class=\"mini ${blocked?'ok':'danger'}\" onclick=\"setStoreBlock('${x.id}',${blocked})\">${blocked?'Desbloquear':'Bloquear'}</button></div></td></tr>`}).join('')||'<tr><td colspan=\"8\">Nenhuma loja encontrada.</td></tr>'}"""
           s2,n=re.subn(pat,rep,s,count=1,flags=re.S)
-          if n!=1:
-              raise SystemExit('Bloco de cobrança CEO não encontrado')
-          # Mostra data de bloqueio na tabela CEO, junto ao vencimento, quando houver.
-          s2=s2.replace("<td>Dia ${x.due_day||'—'}</td>", "<td>Dia ${x.due_day||'—'}${x.block_on?`<div class=muted>Bloqueio: ${esc(x.block_on)}</div>`:''}</td>")
+          if n!=1: raise SystemExit('renderCEO não encontrado')
           p.write_text(s2)
           PY
       - name: Commit
@@ -34,5 +36,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add index.html
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Adicionar data manual de bloqueio na cobranca CEO'
+          git commit -m 'Modernizar painel CEO'
           git push
