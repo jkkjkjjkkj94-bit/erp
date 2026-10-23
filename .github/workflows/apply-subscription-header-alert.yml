@@ -1,4 +1,4 @@
-name: Adicionar comprovante de pagamento
+name: Alterar titulo PIX
 on:
   workflow_dispatch:
   push:
@@ -11,26 +11,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Adicionar fluxo de comprovantes
+      - name: Alterar Misael para Pagar sua mensalidade
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          p=Path('index.html');s=p.read_text()
-          css=""".proof-box{margin-top:12px;padding:14px;border:1px solid #e4e7eb;border-radius:10px;background:#fff}.proof-status{font-size:11px;font-weight:900;padding:6px 9px;border-radius:999px;display:inline-block}.proof-status.pending{background:#fff6d5;color:#806500}.proof-status.approved{background:#eaf8f0;color:#137a47}.proof-status.rejected{background:#fff0ef;color:#b42318}.proof-list{margin-top:16px}.proof-item{border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0;background:#fff}.proof-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}"""
-          if '.proof-box{' not in s:s=s.replace('</style>',css+'</style>',1)
-          # add CEO payment review panel before store table
-          marker='<div class="tablebox"><div class="ceo-toolbar">'
-          panel='''<div class="pix-admin"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><b>Comprovantes de mensalidade</b><div class="muted">Analise os pagamentos enviados pelos lojistas.</div></div><button class="btn" onclick="openPaymentProofs()">Ver comprovantes</button></div></div>'''
-          if 'onclick="openPaymentProofs()"' not in s:s=s.replace(marker,panel+marker,1)
-          # insert button into PIX payment actions
-          old='<button class="btn yellow" onclick="copyPixKey()">Copiar chave PIX</button>'
-          new=old+'<button class="btn primary" onclick="openPaymentProofForm()">Já paguei · Enviar comprovante</button>'
-          if 'openPaymentProofForm()' not in s:s=s.replace(old,new,1)
-          # append helpers before renderCEO
-          anchor='function renderCEO()'
-          helpers="""function openPaymentProofForm(){let x=state.myStore;modal('Enviar comprovante de pagamento',`<div class=\"section-note\">Loja: <b>${esc(x?.name||'')}</b><br>Mensalidade: <b>${money(x?.monthly_fee)}</b></div><label>Data do pagamento</label><input id=\"proofDate\" type=\"date\" value=\"${new Date().toISOString().slice(0,10)}\"><label>Comprovante</label><input id=\"proofFile\" type=\"file\" accept=\"image/png,image/jpeg,image/webp,application/pdf\"><div class=\"payment-note\">Envie imagem ou PDF de até 5 MB.</div><button class=\"btn primary w100\" style=\"margin-top:14px\" onclick=\"submitPaymentProof()\">Enviar para aprovação</button>`)}async function submitPaymentProof(){let x=state.myStore,file=$('proofFile')?.files?.[0],date=$('proofDate')?.value;if(!x||!file||!date){toast('Informe a data e selecione o comprovante','err');return}if(file.size>5242880){toast('Arquivo deve ter no máximo 5 MB','err');return}let u=(await sb.auth.getUser()).data.user;if(!u){toast('Sessão inválida','err');return}let ext=(file.name.split('.').pop()||'bin').toLowerCase(),path=`${u.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;let up=await sb.storage.from('payment-proofs').upload(path,file,{upsert:false,contentType:file.type});if(up.error){toast(up.error.message,'err');return}let ins=await sb.from('subscription_payment_proofs').insert({store_id:x.id,submitted_by:u.id,amount:+x.monthly_fee||0,payment_date:date,proof_path:path});if(ins.error){toast(ins.error.message,'err');return}closeModal();toast('Comprovante enviado para aprovação');}async function openPaymentProofs(){let r=await sb.from('subscription_payment_proofs').select('id,store_id,submitted_by,amount,payment_date,proof_path,status,notes,created_at').order('created_at',{ascending:false});if(r.error){toast(r.error.message,'err');return}let rows=r.data||[],stores=state.stores||[];modal('Comprovantes de mensalidade',`<div class=\"proof-list\">${rows.length?rows.map(v=>{let st=stores.find(x=>x.id===v.store_id),label=v.status==='approved'?'Aprovado':v.status==='rejected'?'Recusado':'Aguardando aprovação';return `<div class=\"proof-item\"><div style=\"display:flex;justify-content:space-between;gap:10px\"><div><b>${esc(st?.name||v.store_id)}</b><div class=\"muted\">Pagamento: ${esc(v.payment_date)} · ${money(v.amount)}</div></div><span class=\"proof-status ${v.status}\">${label}</span></div>${v.notes?`<div class=\"payment-note\">Observação: ${esc(v.notes)}</div>`:''}<div class=\"proof-actions\"><button class=\"mini\" onclick=\"viewPaymentProof('${v.proof_path}')\">Abrir comprovante</button>${v.status==='pending'?`<button class=\"mini ok\" onclick=\"reviewPaymentProof('${v.id}',true)\">Aprovar</button><button class=\"mini danger\" onclick=\"reviewPaymentProof('${v.id}',false)\">Recusar</button>`:''}</div></div>`}).join(''):'<div class=\"muted\">Nenhum comprovante enviado.</div>'}</div>`)}async function viewPaymentProof(path){let r=await sb.storage.from('payment-proofs').createSignedUrl(path,300);if(r.error){toast(r.error.message,'err');return}window.open(r.data.signedUrl,'_blank','noopener')}async function reviewPaymentProof(id,approve){let notes=prompt(approve?'Observação da aprovação (opcional):':'Motivo da recusa (opcional):')||null;let r=await sb.rpc('ceo_review_subscription_payment',{p_payment:id,p_approve:approve,p_notes:notes});if(r.error){toast(r.error.message,'err');return}toast(approve?'Pagamento aprovado e loja liberada':'Pagamento recusado');closeModal();await refreshAll();openPaymentProofs()}"""
-          if 'async function submitPaymentProof()' not in s:s=s.replace(anchor,helpers+anchor,1)
+          p=Path('index.html')
+          s=p.read_text()
+          old="${esc(ps.pix_holder||'Recebedor')}"
+          new="Pagar sua mensalidade"
+          if old in s:
+              s=s.replace(old,new,1)
+          elif 'Pagar sua mensalidade' in s:
+              print('Alteracao ja aplicada')
+          else:
+              raise SystemExit('Texto do recebedor PIX nao encontrado')
           p.write_text(s)
           PY
       - name: Commit
@@ -39,5 +33,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add index.html
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Adicionar envio e aprovação de comprovantes'
+          git commit -m 'Alterar titulo PIX para Pagar sua mensalidade'
           git push
