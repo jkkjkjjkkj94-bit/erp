@@ -1,4 +1,4 @@
-name: Alterar titulo PIX
+name: Adicionar exportacao de auditoria
 on:
   workflow_dispatch:
   push:
@@ -11,21 +11,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Alterar Misael para Pagar sua mensalidade
+      - name: Adicionar exportacao CSV dos logs
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path('index.html')
           s=p.read_text()
-          old="${esc(ps.pix_holder||'Recebedor')}"
-          new="Pagar sua mensalidade"
-          if old in s:
-              s=s.replace(old,new,1)
-          elif 'Pagar sua mensalidade' in s:
-              print('Alteracao ja aplicada')
+          marker='</body>'
+          addon=r'''<script>
+async function exportAuditLogsCSV(){
+  try{
+    if(!state||!state.profile||!state.profile.store_id){toast('Loja não identificada');return}
+    const {data,error}=await sb.from('audit_logs').select('*').eq('store_id',state.profile.store_id).order('created_at',{ascending:false});
+    if(error)throw error;
+    if(!data||!data.length){toast('Nenhum log de auditoria para exportar');return}
+    const cols=Array.from(new Set(data.flatMap(x=>Object.keys(x))));
+    const q=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+    const csv='\ufeff'+cols.map(q).join(';')+'\n'+data.map(r=>cols.map(c=>q(typeof r[c]==='object'?JSON.stringify(r[c]):r[c])).join(';')).join('\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);a.download='audit-logs-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);toast('Audit logs exportados');
+  }catch(e){toast(e.message||'Não foi possível exportar os logs')}
+}
+function addAuditExportButton(){
+  const page=document.querySelector('[data-page="audit"]')||document.querySelector('#audit');
+  const root=document.getElementById('page-audit')||document.querySelector('.page[data-page="audit"]')||document.getElementById('audit');
+  if(!root||root.querySelector('#exportAuditCsv'))return;
+  const head=root.querySelector('.head');if(!head)return;
+  const b=document.createElement('button');b.id='exportAuditCsv';b.className='btn secondary';b.textContent='Exportar Audit Logs CSV';b.onclick=exportAuditLogsCSV;head.appendChild(b);
+}
+setInterval(addAuditExportButton,1200);
+</script>'''
+          if 'function exportAuditLogsCSV()' not in s:
+              if marker not in s: raise SystemExit('body nao encontrado')
+              s=s.replace(marker,addon+marker,1)
+              p.write_text(s)
           else:
-              raise SystemExit('Texto do recebedor PIX nao encontrado')
-          p.write_text(s)
+              print('Exportacao de auditoria ja aplicada')
           PY
       - name: Commit
         run: |
@@ -33,5 +54,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add index.html
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Alterar titulo PIX para Pagar sua mensalidade'
+          git commit -m 'Adicionar exportacao CSV dos logs de auditoria'
           git push
