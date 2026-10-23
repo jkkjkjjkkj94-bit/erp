@@ -1,4 +1,4 @@
-name: Adicionar PIX e QR Code da assinatura
+name: Corrigir carregamento PIX
 on:
   workflow_dispatch:
   push:
@@ -11,26 +11,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Adicionar configuracao PIX
+      - name: Carregar PIX antes de renderizar assinatura
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          p=Path('index.html');s=p.read_text()
-          css=""".pix-admin{margin:18px 0;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px}.pix-admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.qr-preview{width:180px;height:180px;object-fit:contain;border:1px solid var(--line);border-radius:12px;background:#fff;padding:8px}.pix-pay-grid{display:grid;grid-template-columns:190px 1fr;gap:18px;align-items:center}.pix-copy{font-family:monospace;background:#f5f6f7;padding:11px;border-radius:8px;word-break:break-all}@media(max-width:700px){.pix-admin-grid,.pix-pay-grid{grid-template-columns:1fr}.qr-preview{width:160px;height:160px}}"""
-          if '.pix-admin{' not in s:s=s.replace('</style>',css+'</style>',1)
-          # CEO: add payment settings card before store table
-          marker='<div class="tablebox"><div class="ceo-toolbar">'
-          admin='''<div class="pix-admin"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><div><b>Recebimento via PIX</b><div class="muted">Cadastre a chave PIX e envie a imagem do QR Code que será exibida aos lojistas.</div></div><button class="btn" onclick="openPixSettings()">Configurar PIX</button></div></div>'''
-          if 'onclick="openPixSettings()"' not in s:s=s.replace(marker,admin+marker,1)
-          # replace subscription renderer/payment helpers
-          pat=r"function renderSubscription\(\)\{.*?\}(?=function renderCEO\(\))"
-          rep="""async function loadPaymentSettings(){let{data,error}=await sb.from('platform_payment_settings').select('pix_key,pix_holder,pix_qr_url').eq('id',1).maybeSingle();if(!error)state.paymentSettings=data||{};return state.paymentSettings||{}}function renderSubscription(){let x=state.myStore;if(!x||!$('subscriptionCard'))return;let ps=state.paymentSettings||{},blocked=!x.active||x.subscription_status==='blocked',fmt=v=>{if(!v)return '—';return new Date(v+'T12:00:00').toLocaleDateString('pt-BR')};$('subscriptionCard').innerHTML=`<div style=\"display:flex;justify-content:space-between;gap:15px;align-items:center\"><div><div class=\"muted\">STATUS</div><h2>${blocked?'Loja bloqueada':'Assinatura ativa'}</h2></div><span class=\"badge ${blocked?'danger':'ok'}\">${blocked?'BLOQUEADA':'ATIVA'}</span></div><div class=\"dreline\"><span>Mensalidade</span><b>${money(x.monthly_fee)}</b></div><div class=\"dreline\"><span>Vencimento</span><b>Dia ${x.due_day||'—'}</b></div><div class=\"dreline\"><span>Assinatura válida até</span><b>${fmt(x.paid_until)}</b></div>${x.block_on?`<div class=\"dreline\"><span>Data limite</span><b>${fmt(x.block_on)}</b></div>`:''}<div class=\"paybox\"><div class=\"pay-head\"><div><b>Pagar mensalidade</b><div class=\"muted\">Pagamento via PIX</div></div><div class=\"pay-value\">${money(x.monthly_fee)}</div></div>${ps.pix_key?`<div class=\"pixbox\"><div class=\"pix-pay-grid\">${ps.pix_qr_url?`<img class=\"qr-preview\" src=\"${esc(ps.pix_qr_url)}\" alt=\"QR Code PIX\">`:'<div class=\"qr-preview\" style=\"display:grid;place-items:center\">QR Code não cadastrado</div>'}<div><b>${esc(ps.pix_holder||'Recebedor')}</b><div class=\"payment-note\">Chave PIX</div><div class=\"pix-copy\">${esc(ps.pix_key)}</div><div class=\"pay-actions\"><button class=\"btn yellow\" onclick=\"copyPixKey()\">Copiar chave PIX</button></div><div class=\"payment-note\">Após o pagamento, aguarde a confirmação do administrador.</div></div></div></div>`:'<div class=\"pixbox\">Dados PIX ainda não cadastrados pelo administrador.</div>'}</div>`}async function copyPixKey(){let k=state.paymentSettings?.pix_key;if(!k)return;try{await navigator.clipboard.writeText(k);toast('Chave PIX copiada')}catch(e){toast('Não foi possível copiar','err')}}async function openPixSettings(){let{data}=await sb.from('platform_payment_settings').select('*').eq('id',1).single(),x=data||{};modal('Configurar recebimento PIX',`<label>Nome do recebedor</label><input id=\"pixHolder\" value=\"${esc(x.pix_holder||'')}\" placeholder=\"Nome ou empresa\"><label>Chave PIX</label><input id=\"pixKey\" value=\"${esc(x.pix_key||'')}\" placeholder=\"CPF, CNPJ, e-mail, telefone ou chave aleatória\"><label>Imagem do QR Code</label><input id=\"pixQrFile\" type=\"file\" accept=\"image/png,image/jpeg,image/webp\">${x.pix_qr_url?`<div style=\"margin-top:10px\"><img class=\"qr-preview\" src=\"${esc(x.pix_qr_url)}\"></div>`:''}<button class=\"btn primary w100\" style=\"margin-top:14px\" onclick=\"savePixSettings()\">Salvar PIX e QR Code</button>`)}async function savePixSettings(){let key=$('pixKey').value.trim(),holder=$('pixHolder').value.trim(),file=$('pixQrFile').files[0],url=state.paymentSettings?.pix_qr_url||null;if(!key){toast('Informe a chave PIX','err');return}if(file){let ext=(file.name.split('.').pop()||'png').toLowerCase(),path=`pix/qr-code.${ext}`,up=await sb.storage.from('payment-assets').upload(path,file,{upsert:true,contentType:file.type});if(up.error){toast(up.error.message,'err');return}url=sb.storage.from('payment-assets').getPublicUrl(path).data.publicUrl+'?v='+Date.now()}let u=(await sb.auth.getUser()).data.user,{error}=await sb.from('platform_payment_settings').update({pix_key:key,pix_holder:holder,pix_qr_url:url,updated_at:new Date().toISOString(),updated_by:u?.id}).eq('id',1);if(error){toast(error.message,'err');return}state.paymentSettings={pix_key:key,pix_holder:holder,pix_qr_url:url};closeModal();toast('PIX atualizado');renderSubscription()}"""
-          s2,n=re.subn(pat,rep,s,count=1,flags=re.S)
-          if n!=1: raise SystemExit('renderSubscription nao encontrado')
-          # load settings before renders during refreshAll when possible
-          s2=s2.replace('renderAll();','await loadPaymentSettings();renderAll();',1) if 'await loadPaymentSettings();renderAll();' not in s2 else s2
-          p.write_text(s2)
+          p=Path('index.html')
+          s=p.read_text()
+          old="state.stores=ceo?(q[9]?.data||[]):[];renderAll()}"
+          new="state.stores=ceo?(q[9]?.data||[]):[];await loadPaymentSettings();renderAll()}"
+          if old not in s:
+              if new in s:
+                  print('Correcao ja aplicada')
+              else:
+                  raise SystemExit('Ponto de refreshAll nao encontrado')
+          else:
+              s=s.replace(old,new,1)
+              p.write_text(s)
           PY
       - name: Commit
         run: |
@@ -38,5 +34,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add index.html
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Adicionar PIX e QR Code da assinatura'
+          git commit -m 'Corrigir carregamento dos dados PIX'
           git push
