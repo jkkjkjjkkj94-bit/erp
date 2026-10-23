@@ -1,0 +1,38 @@
+name: Add delete store account
+on:
+  push:
+    paths:
+      - '.github/workflows/add-delete-store-account.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add delete account action
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          old="<button class=\"mini ${blocked?'ok':'danger'}\" onclick=\"setStoreBlock('${x.id}',${blocked})\">${blocked?'Desbloquear':'Bloquear'}</button></div></td></tr>"
+          new="<button class=\"mini ${blocked?'ok':'danger'}\" onclick=\"setStoreBlock('${x.id}',${blocked})\">${blocked?'Desbloquear':'Bloquear'}</button><button class=\"mini danger\" onclick=\"deleteStoreAccount('${x.id}')\">Excluir</button></div></td></tr>"
+          if old not in s:
+              raise SystemExit('CEO action marker not found')
+          s=s.replace(old,new,1)
+          marker="function openStoreBilling(id){"
+          fn="""async function deleteStoreAccount(id){let x=state.stores.find(s=>s.id===id);if(!x)return;if(id===state.profile?.store_id)return toast('A loja da sessão CEO atual não pode ser excluída');let c=prompt(`Esta ação remove a loja do painel e bloqueia todos os seus usuários.\\n\\nPara excluir ${x.name}, digite EXCLUIR:`);if(c!=='EXCLUIR')return;let now=new Date().toISOString();let pr=await sb.from('profiles').update({active:false,updated_at:now}).eq('store_id',id);if(pr.error)return toast('Não foi possível desativar os usuários: '+pr.error.message);let st=await sb.from('stores').update({active:false,subscription_status:'cancelled',deleted_at:now,blocked_at:now,blocked_reason:'Conta excluída pelo CEO',owner_id:null,updated_at:now}).eq('id',id).select('id').maybeSingle();if(st.error)return toast('Não foi possível excluir a conta: '+st.error.message);if(!st.data)return toast('A conta não foi alterada. Verifique as permissões do CEO.');if(state.ceoStore===id)state.ceoStore=null;toast('Conta excluída e usuários bloqueados');await refreshAll()}"""
+          if marker not in s:
+              raise SystemExit('billing marker not found')
+          s=s.replace(marker,fn+marker,1)
+          p.write_text(s)
+          PY
+      - name: Commit patched index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Adicionar botão para excluir conta de loja"
+          git push
